@@ -58,6 +58,8 @@ export const api = {
   getDefaults: () => fetchJSON<Record<string, unknown>>("/api/config/defaults"),
   getSchema: () => fetchJSON<{ fields: Record<string, unknown>; category_order: string[] }>("/api/config/schema"),
   getModelInfo: () => fetchJSON<ModelInfoResponse>("/api/model/info"),
+  getAvailableModels: () =>
+    fetchJSON<AvailableModelsResponse>("/api/models"),
   saveConfig: (config: Record<string, unknown>) =>
     fetchJSON<{ ok: boolean }>("/api/config", {
       method: "PUT",
@@ -198,6 +200,143 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name }),
     }),
+
+  // Activity feed
+  getActivity: (limit = 50, offset = 0) =>
+    fetchJSON<ActivityResponse>(`/api/activity?limit=${limit}&offset=${offset}`),
+
+  // Skills marketplace
+  searchMarketplace: (q = "", limit = 20) =>
+    fetchJSON<MarketplaceResponse>(`/api/skills/marketplace?q=${encodeURIComponent(q)}&limit=${limit}`),
+  installSkill: (identifier: string, category = "", force = false) =>
+    fetchJSON<{ ok: boolean; identifier: string; output?: string; error?: string }>(
+      "/api/skills/install",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ identifier, category, force }),
+      },
+    ),
+  uninstallSkill: (name: string) =>
+    fetchJSON<{ ok: boolean; name: string }>(`/api/skills/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    }),
+
+  // Boards
+  getBoards: () => fetchJSON<BoardsResponse>("/api/boards"),
+  createBoard: (data: { name: string; description?: string; color?: string }) =>
+    fetchJSON<Board>("/api/boards", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    }),
+  getBoard: (id: string) => fetchJSON<Board>(`/api/boards/${id}`),
+  deleteBoard: (id: string) =>
+    fetchJSON<{ ok: boolean }>(`/api/boards/${id}`, { method: "DELETE" }),
+  createTask: (boardId: string, data: Partial<Task>) =>
+    fetchJSON<Task>(`/api/boards/${boardId}/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    }),
+  updateTask: (taskId: string, data: Partial<Task>) =>
+    fetchJSON<Task>(`/api/tasks/${taskId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    }),
+  deleteTask: (taskId: string) =>
+    fetchJSON<{ ok: boolean }>(`/api/tasks/${taskId}`, { method: "DELETE" }),
+
+  // Approvals
+  getApprovals: (status?: string) => {
+    const qs = status ? `?status=${encodeURIComponent(status)}` : "";
+    return fetchJSON<ApprovalsResponse>(`/api/approvals${qs}`);
+  },
+  approveAction: (id: string, reason = "") =>
+    fetchJSON<Approval>(`/api/approvals/${id}/approve`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason, resolved_by: "web" }),
+    }),
+  denyAction: (id: string, reason = "") =>
+    fetchJSON<Approval>(`/api/approvals/${id}/deny`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason, resolved_by: "web" }),
+    }),
+
+  // Agents
+  getDashboardAgents: () =>
+    fetchJSON<DashboardAgentsResponse>("/api/agents"),
+  spawnAgent: (goal: string, model = "", maxIterations = 90) =>
+    fetchJSON<SpawnAgentResponse>("/api/agents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ goal, model, max_iterations: maxIterations }),
+    }),
+  stopAgent: (sessionId: string) =>
+    fetchJSON<{ ok: boolean; session_id: string; status: string }>(
+      `/api/agents/${sessionId}/stop`,
+      { method: "POST" },
+    ),
+
+  // Chat
+  sendMessage: (sessionId: string, message: string) =>
+    fetchJSON<{ ok: boolean; session_id: string }>("/api/chat/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, message }),
+    }),
+
+  // File upload
+  uploadFile: async (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    const token = window.__HERMES_SESSION_TOKEN__;
+    const headers = new Headers();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    const res = await fetch("/api/upload", { method: "POST", headers, body: form });
+    if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+    return res.json() as Promise<{ ok: boolean; filename: string; original_name: string; size: number; path: string }>;
+  },
+
+  // Mission Control: System Metrics
+  getSystemMetrics: () => fetchJSON<SystemMetrics>("/api/system/metrics"),
+  getMetricsHistory: (seconds = 300) =>
+    fetchJSON<MetricsHistory>(`/api/system/metrics/history?seconds=${seconds}`),
+
+  // Mission Control: Live Monitor
+  getMonitorSessions: () =>
+    fetchJSON<MonitorSessionsResponse>("/api/monitor/sessions"),
+
+  // Mission Control: Collaboration
+  getHandoffs: (status?: string) => {
+    const qs = status ? `?status=${encodeURIComponent(status)}` : "";
+    return fetchJSON<HandoffsResponse>(`/api/collaboration/handoffs${qs}`);
+  },
+  createHandoff: (data: {
+    from_session: string;
+    to_session?: string;
+    task: string;
+    context?: string;
+    priority?: string;
+  }) =>
+    fetchJSON<Handoff>("/api/collaboration/handoff", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    }),
+  acceptHandoff: (id: string) =>
+    fetchJSON<Handoff>(`/api/collaboration/handoffs/${id}/accept`, {
+      method: "POST",
+    }),
+  completeHandoff: (id: string) =>
+    fetchJSON<Handoff>(`/api/collaboration/handoffs/${id}/complete`, {
+      method: "POST",
+    }),
+  getCollabGraph: () =>
+    fetchJSON<CollabGraphResponse>("/api/collaboration/graph"),
 };
 
 export interface PlatformStatus {
@@ -377,6 +516,88 @@ export interface SessionSearchResponse {
   results: SessionSearchResult[];
 }
 
+// ── Activity feed types ─────────────────────────────────────────────
+
+export interface ActivityEvent {
+  id: string;
+  type: "session" | "cron" | "tool" | "error";
+  action: string;
+  title: string;
+  source: string;
+  timestamp: number | null;
+  details: Record<string, unknown>;
+}
+
+export interface ActivityResponse {
+  events: ActivityEvent[];
+  total: number;
+}
+
+export interface MarketplaceSkill {
+  name: string;
+  description: string;
+  source: string;
+  identifier: string;
+  trust_level: string;
+  tags: string[];
+}
+
+export interface MarketplaceResponse {
+  skills: MarketplaceSkill[];
+  query: string;
+  error?: string;
+}
+
+// ── Board types ─────────────────────────────────────────────────────
+
+export interface Board {
+  id: string;
+  name: string;
+  description: string;
+  color: string;
+  created_at: string;
+  updated_at: string;
+  task_counts: { todo: number; in_progress: number; done: number };
+  tasks?: Task[];
+}
+
+export interface Task {
+  id: string;
+  board_id: string;
+  title: string;
+  description: string;
+  status: "todo" | "in_progress" | "done";
+  priority: "low" | "normal" | "high" | "urgent";
+  tags: string[];
+  position: number;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
+export interface BoardsResponse {
+  boards: Board[];
+}
+
+// ── Approval types ──────────────────────────────────────────────────
+
+export interface Approval {
+  id: string;
+  session_id: string;
+  tool_name: string;
+  command: string;
+  risk_level: string;
+  status: string;
+  requested_at: string;
+  resolved_at: string | null;
+  resolved_by: string | null;
+  reason: string | null;
+}
+
+export interface ApprovalsResponse {
+  approvals: Approval[];
+}
+
 // ── Model info types ──────────────────────────────────────────────────
 
 export interface ModelInfoResponse {
@@ -479,4 +700,148 @@ export interface PluginManifestResponse {
   css?: string | null;
   has_api: boolean;
   source: string;
+}
+
+// ── Agent lifecycle types ─────────────────────────────────────────
+
+export interface DashboardAgent {
+  session_id: string;
+  goal: string;
+  model: string;
+  status: "starting" | "running" | "completed" | "failed" | "stopped";
+  started_at: number;
+  finished_at: number | null;
+  error: string | null;
+  result: string | null;
+}
+
+export interface DashboardAgentsResponse {
+  agents: DashboardAgent[];
+}
+
+export interface SpawnAgentResponse {
+  session_id: string;
+  goal: string;
+  status: string;
+}
+
+export interface AvailableModelsResponse {
+  current_provider: string;
+  providers: Record<string, string[]>;
+}
+
+// ── Mission Control: System Metrics ──────────────────────────────
+
+export interface SystemMetrics {
+  timestamp: number;
+  cpu: {
+    percent: number;
+    count: number;
+    per_core: number[];
+    load_avg: { "1m": number; "5m": number; "15m": number };
+  };
+  memory: {
+    total: number;
+    available: number;
+    used: number;
+    percent: number;
+    swap_total: number;
+    swap_used: number;
+    swap_percent: number;
+  };
+  disks: Array<{
+    device: string;
+    mountpoint: string;
+    fstype: string;
+    total: number;
+    used: number;
+    free: number;
+    percent: number;
+  }>;
+  network: {
+    bytes_sent: number;
+    bytes_recv: number;
+    packets_sent: number;
+    packets_recv: number;
+  };
+  top_processes: Array<{
+    pid: number;
+    name: string;
+    cpu_percent: number;
+    memory_percent: number;
+  }>;
+}
+
+export interface MetricsSample {
+  ts: number;
+  cpu: number;
+  mem: number;
+}
+
+export interface MetricsHistory {
+  samples: MetricsSample[];
+  interval: number;
+}
+
+// ── Mission Control: Monitor ─────────────────────────────────────
+
+export interface MonitorSession {
+  id: string;
+  source: string | null;
+  model: string | null;
+  title: string | null;
+  started_at: number | null;
+  last_active: number | null;
+  message_count: number;
+  tool_call_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  agent_status?: string;
+  current_tool?: string | null;
+  iteration?: number;
+  error?: string | null;
+}
+
+export interface MonitorSessionsResponse {
+  sessions: MonitorSession[];
+}
+
+// ── Mission Control: Collaboration ───────────────────────────────
+
+export interface Handoff {
+  id: string;
+  from_session: string;
+  to_session: string | null;
+  task: string;
+  context: string | null;
+  priority: string;
+  status: "pending" | "in_progress" | "completed" | "failed";
+  created_at: number;
+  accepted_at: number | null;
+  completed_at: number | null;
+}
+
+export interface HandoffsResponse {
+  handoffs: Handoff[];
+}
+
+export interface CollabNode {
+  id: string;
+  label: string;
+  handoffs_out: number;
+  handoffs_in: number;
+}
+
+export interface CollabEdge {
+  id: string;
+  from: string;
+  to: string;
+  task: string;
+  status: string;
+  created_at: number;
+}
+
+export interface CollabGraphResponse {
+  nodes: CollabNode[];
+  edges: CollabEdge[];
 }

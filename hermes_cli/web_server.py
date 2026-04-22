@@ -92,16 +92,18 @@ app.add_middleware(
 # /api/ is gated by the auth middleware below.  Keep this list minimal —
 # only truly non-sensitive, read-only endpoints belong here.
 # ---------------------------------------------------------------------------
-_PUBLIC_API_PATHS: frozenset = frozenset({
+_PUBLIC_API_PATHS = frozenset({
     "/api/status",
     "/api/config/defaults",
     "/api/config/schema",
     "/api/model/info",
+    "/api/models",
+    "/api/providers/oauth",
     "/api/dashboard/themes",
     "/api/dashboard/plugins",
     "/api/dashboard/plugins/rescan",
+    "/api/monitor/stream",
 })
-
 
 def _require_token(request: Request) -> None:
     """Validate the ephemeral session token.  Raises 401 on mismatch.
@@ -138,87 +140,259 @@ _SCHEMA_OVERRIDES: Dict[str, Dict[str, Any]] = {
     "model": {
         "type": "string",
         "description": "Default model (e.g. anthropic/claude-sonnet-4.6)",
+        "tooltip": "The AI model used for all conversations. Format: provider/model-name. Leave blank to use the provider's default. You can switch per-session with /model.",
         "category": "general",
     },
     "model_context_length": {
         "type": "number",
         "description": "Context window override (0 = auto-detect from model metadata)",
+        "tooltip": "Maximum tokens the model can process in one conversation. Set to 0 to auto-detect from the model's metadata. Only override if auto-detection gives the wrong value.",
         "category": "general",
     },
     "terminal.backend": {
         "type": "select",
         "description": "Terminal execution backend",
+        "tooltip": "Where shell commands run. 'local' = directly on this machine. 'docker' = inside a Docker container (safer isolation). 'ssh' = on a remote server. Use 'local' unless you need sandboxing.",
         "options": ["local", "docker", "ssh", "modal", "daytona", "singularity"],
+        "option_descriptions": {
+            "local": "Run commands directly on this machine. Fastest, no setup required.",
+            "docker": "Run in a Docker container. Isolated from host — good for untrusted code.",
+            "ssh": "Run on a remote server via SSH. Requires SSH config.",
+            "modal": "Run on Modal cloud serverless. Pay-per-use, auto-scales.",
+            "daytona": "Run in a Daytona cloud workspace. Pre-configured dev environments.",
+            "singularity": "Run in a Singularity container. Common in HPC clusters.",
+        },
     },
     "terminal.modal_mode": {
         "type": "select",
         "description": "Modal sandbox mode",
+        "tooltip": "Only applies when backend is 'modal'. 'sandbox' = isolated environment that resets each run. 'function' = persistent serverless function.",
         "options": ["sandbox", "function"],
+        "option_descriptions": {
+            "sandbox": "Fresh isolated environment each run. State is discarded after.",
+            "function": "Persistent serverless function. State persists between calls.",
+        },
+    },
+    "terminal.timeout": {
+        "tooltip": "Max seconds a single shell command can run before being killed. Increase for long builds or downloads. Default: 180s (3 minutes).",
+    },
+    "terminal.persistent_shell": {
+        "tooltip": "When enabled, the shell session persists between commands (like a real terminal). Keeps environment variables, cwd, and shell state. Recommended: true.",
+    },
+    "agent.max_turns": {
+        "tooltip": "Maximum number of API calls (tool-use iterations) per conversation. The agent stops after this many turns even if the task isn't finished. Increase for complex tasks.",
+    },
+    "agent.reasoning_effort": {
+        "tooltip": "How hard the model 'thinks' before responding. 'low' = fast, cheap, surface-level. 'high' = slow, expensive, deeper reasoning. Affects models with extended thinking (o1, Claude, etc).",
+    },
+    "agent.tool_use_enforcement": {
+        "tooltip": "'auto' = model decides when to use tools. Forces the model to use tools for tasks that need them instead of guessing.",
+    },
+    "agent.gateway_timeout": {
+        "tooltip": "Max seconds the gateway process waits for an agent response before giving up. Increase if your tasks run long. Default: 1800 (30 min).",
     },
     "tts.provider": {
         "type": "select",
         "description": "Text-to-speech provider",
+        "tooltip": "Reads agent responses aloud. 'edge' = free Microsoft Edge TTS (no API key needed). 'elevenlabs' = high quality, requires ELEVENLABS_API_KEY. 'openai' = requires OPENAI_API_KEY.",
         "options": ["edge", "elevenlabs", "openai", "neutts"],
+        "option_descriptions": {
+            "edge": "Free Microsoft Edge TTS. No API key needed. Good quality, many voices.",
+            "elevenlabs": "Premium quality voices. Requires ELEVENLABS_API_KEY. Best natural sound.",
+            "openai": "OpenAI TTS. Requires OPENAI_API_KEY. Fast and reliable.",
+            "neutts": "Local neural TTS. Runs on your machine. Private but slower.",
+        },
     },
     "stt.provider": {
         "type": "select",
         "description": "Speech-to-text provider",
+        "tooltip": "Transcribes voice input. 'local' = runs Whisper on your machine (free, private, slower). 'openai' = cloud Whisper API (fast, needs OPENAI_API_KEY). 'mistral' = Mistral Voxtral.",
         "options": ["local", "openai", "mistral"],
+        "option_descriptions": {
+            "local": "Runs Whisper locally. Free, private, no API key. Slower on CPU.",
+            "openai": "Cloud Whisper API. Fast and accurate. Requires OPENAI_API_KEY.",
+            "mistral": "Mistral Voxtral. Good multilingual support. Requires MISTRAL_API_KEY.",
+        },
     },
     "display.skin": {
         "type": "select",
         "description": "CLI visual theme",
+        "tooltip": "Changes the look of the CLI terminal interface. Does not affect this web dashboard. Each skin has different colors, spinner animations, and branding.",
         "options": ["default", "ares", "mono", "slate"],
+        "option_descriptions": {
+            "default": "Standard Hermes theme with teal accents.",
+            "ares": "Bold red/orange theme. Military-inspired aesthetic.",
+            "mono": "Minimalist black and white. Clean and distraction-free.",
+            "slate": "Dark blue-gray theme. Professional and understated.",
+        },
     },
     "dashboard.theme": {
         "type": "select",
         "description": "Web dashboard visual theme",
+        "tooltip": "Color theme for this web dashboard. Changes background, accent colors, and text contrast.",
         "options": ["default", "midnight", "ember", "mono", "cyberpunk", "rose"],
+        "option_descriptions": {
+            "default": "Standard dark theme with green accents.",
+            "midnight": "Deep blue-black theme. Easy on the eyes at night.",
+            "ember": "Warm orange/amber tones. Cozy feel.",
+            "mono": "Grayscale only. Minimal and focused.",
+            "cyberpunk": "Neon purple/cyan. High contrast futuristic look.",
+            "rose": "Soft pink/red accents. Elegant and modern.",
+        },
     },
     "display.resume_display": {
         "type": "select",
         "description": "How resumed sessions display history",
+        "tooltip": "When you resume a previous session: 'full' = show all past messages. 'minimal' = show just a summary. 'off' = start fresh (context is still loaded, just not displayed).",
         "options": ["minimal", "full", "off"],
+        "option_descriptions": {
+            "minimal": "Show a summary of past messages. Quick overview.",
+            "full": "Show all previous messages. Complete history visible.",
+            "off": "Start fresh visually. Past context still loads behind the scenes.",
+        },
     },
     "display.busy_input_mode": {
         "type": "select",
         "description": "Input behavior while agent is running",
+        "tooltip": "What happens when you type while the agent is working: 'interrupt' = your message cancels the current task and starts a new one. 'queue' = your message waits until the agent finishes. 'block' = input is locked until done.",
         "options": ["queue", "interrupt", "block"],
+        "option_descriptions": {
+            "queue": "Your message waits until the agent finishes its current task.",
+            "interrupt": "Your message cancels the current task immediately. Most responsive.",
+            "block": "Input is locked. You must wait for the agent to finish.",
+        },
+    },
+    "display.show_reasoning": {
+        "tooltip": "Show the model's internal 'thinking' process in the output. Useful for debugging but adds noise. Works with models that support extended thinking.",
+    },
+    "display.streaming": {
+        "tooltip": "Show responses word-by-word as they're generated (like ChatGPT). Disable for cleaner output in scripts or logs.",
+    },
+    "display.compact": {
+        "tooltip": "Reduces visual spacing and decorations in the CLI. Good for small terminal windows or dense output.",
+    },
+    "display.bell_on_complete": {
+        "tooltip": "Play a terminal bell sound when the agent finishes a task. Useful when you're waiting for a long task and working in another window.",
+    },
+    "display.inline_diffs": {
+        "tooltip": "Show file edit diffs inline in the conversation instead of just confirming 'file updated'. Helps verify changes before they're applied.",
     },
     "memory.provider": {
         "type": "select",
         "description": "Memory provider plugin",
+        "tooltip": "How the agent remembers things across sessions. 'builtin' = stores memories locally in ~/.hermes/memory. 'honcho' = uses Honcho cloud service for memory management.",
         "options": ["builtin", "honcho"],
+        "option_descriptions": {
+            "builtin": "Local file-based memory. Stored in ~/.hermes/memory. Private, no cloud.",
+            "honcho": "Honcho cloud memory service. Better cross-device sync. Requires API key.",
+        },
+    },
+    "memory.memory_enabled": {
+        "tooltip": "Enable persistent memory across sessions. The agent will remember your preferences, project details, and past corrections. Disable if you want completely fresh conversations each time.",
     },
     "approvals.mode": {
         "type": "select",
         "description": "Dangerous command approval mode",
+        "tooltip": "Controls when the agent asks permission before running risky commands (rm, mkfs, dd, etc). 'ask' = prompt you each time. 'deny' = block dangerous commands entirely. 'yolo' = run everything without asking (not recommended).",
         "options": ["ask", "yolo", "deny"],
+        "option_descriptions": {
+            "ask": "Prompt before dangerous commands. Recommended for most users.",
+            "yolo": "Run everything without asking. Only for trusted automated workflows.",
+            "deny": "Block all dangerous commands. Safest, but may interrupt tasks.",
+        },
     },
     "context.engine": {
         "type": "select",
         "description": "Context management engine",
+        "tooltip": "How the agent manages long conversations that exceed the model's context window. 'default' = standard truncation. 'custom' = smart compression that preserves important context.",
         "options": ["default", "custom"],
+        "option_descriptions": {
+            "default": "Standard truncation. Simple but may lose important context.",
+            "custom": "Smart compression. Summarizes old messages to preserve key info.",
+        },
     },
     "human_delay.mode": {
         "type": "select",
         "description": "Simulated typing delay mode",
+        "tooltip": "Adds artificial delays to simulate human typing speed. 'off' = instant responses. 'typing' = delay based on message length. 'fixed' = constant delay per message. Only useful for demos.",
         "options": ["off", "typing", "fixed"],
+        "option_descriptions": {
+            "off": "No delay. Instant responses. Normal usage.",
+            "typing": "Delay scales with message length. Simulates human typing speed.",
+            "fixed": "Constant delay per message. Predictable pacing.",
+        },
     },
     "logging.level": {
         "type": "select",
         "description": "Log level for agent.log",
+        "tooltip": "How much detail to write to log files. 'DEBUG' = everything (huge files, good for troubleshooting). 'INFO' = normal operations. 'WARNING' = only problems. 'ERROR' = only failures.",
         "options": ["DEBUG", "INFO", "WARNING", "ERROR"],
+        "option_descriptions": {
+            "DEBUG": "Log everything. Huge files but great for troubleshooting.",
+            "INFO": "Normal operations. Recommended for most users.",
+            "WARNING": "Only warnings and errors. Quieter logs.",
+            "ERROR": "Only errors. Minimal logging.",
+        },
     },
     "agent.service_tier": {
         "type": "select",
         "description": "API service tier (OpenAI/Anthropic)",
+        "tooltip": "Priority level for API requests. 'auto' = let the provider decide. 'default' = standard tier. 'flex' = cheaper but may be slower or rate-limited. Only applies to OpenAI/Anthropic.",
         "options": ["", "auto", "default", "flex"],
+        "option_descriptions": {
+            "": "Use provider default. No tier preference set.",
+            "auto": "Let the provider pick the best tier automatically.",
+            "default": "Standard priority. Normal speed and availability.",
+            "flex": "Lower priority. Cheaper but may be slower or queued.",
+        },
     },
     "delegation.reasoning_effort": {
         "type": "select",
         "description": "Reasoning effort for delegated subagents",
+        "tooltip": "When the main agent spawns sub-agents for parallel tasks, this controls how hard they think. 'high' = better results but slower and more expensive.",
         "options": ["", "low", "medium", "high"],
+        "option_descriptions": {
+            "": "Use model default reasoning effort.",
+            "low": "Fast and cheap. Good for simple tasks.",
+            "medium": "Balanced speed and quality. Good default.",
+            "high": "Deep reasoning. Best quality but slowest and most expensive.",
+        },
+    },
+    "delegation.max_iterations": {
+        "tooltip": "Maximum tool-calling iterations for each delegated sub-agent task. Sub-agents share this budget independently.",
+    },
+    "compression.enabled": {
+        "tooltip": "When a conversation gets too long, automatically compress old messages to save context space. The agent summarizes earlier parts of the conversation instead of losing them entirely.",
+    },
+    "compression.threshold": {
+        "tooltip": "Trigger compression when context usage reaches this fraction (0.5 = 50% full). Lower values compress earlier, keeping more room for new messages.",
+    },
+    "checkpoints.enabled": {
+        "tooltip": "Periodically save snapshots of the agent's state during long tasks. Allows rolling back if something goes wrong.",
+    },
+    "security.redact_secrets": {
+        "tooltip": "Automatically detect and redact API keys, passwords, and tokens from logs and output. Recommended: keep enabled.",
+    },
+    "browser.inactivity_timeout": {
+        "tooltip": "Close the browser automation session after this many seconds of no activity. Prevents orphaned browser processes from consuming resources.",
+    },
+    "voice.auto_tts": {
+        "tooltip": "Automatically read all agent responses aloud using the configured TTS provider. Disable to only hear responses when manually triggered.",
+    },
+    "display.bell_on_complete": {
+        "tooltip": "Play a terminal bell sound when the agent finishes a task. Useful when you're waiting for a long task and working in another window.",
+    },
+    "display.inline_diffs": {
+        "tooltip": "Show file edit diffs inline in the conversation instead of just confirming 'file updated'. Helps verify changes before they're applied.",
+    },
+    "cron.wrap_response": {
+        "tooltip": "When a cron job runs, send the agent's response to the configured delivery target (Telegram, Discord, etc). Disable to run jobs silently.",
+    },
+    "network.force_ipv4": {
+        "tooltip": "Force all outbound connections to use IPv4. Enable if you're on a network where IPv6 is broken or misconfigured.",
+    },
+    "toolsets": {
+        "tooltip": "Comma-separated list of toolsets the agent can use. 'hermes-cli' = standard tools (terminal, files, web, browser). Add more toolsets to enable additional capabilities.",
     },
 }
 
@@ -577,7 +751,85 @@ async def get_defaults():
 
 @app.get("/api/config/schema")
 async def get_schema():
-    return {"fields": CONFIG_SCHEMA, "category_order": _CATEGORY_ORDER}
+    """Return config schema with dynamic model options injected."""
+    # Deep copy so we don't mutate the module-level CONFIG_SCHEMA
+    import copy
+    fields = copy.deepcopy(CONFIG_SCHEMA)
+
+    # Inject available models into the model field as a select
+    try:
+        from hermes_cli.models import _PROVIDER_MODELS
+        from hermes_cli.auth import PROVIDER_REGISTRY, get_active_provider
+
+        active_provider = get_active_provider() or ""
+        cfg = load_config()
+        if not active_provider:
+            active_provider = cfg.get("provider", "")
+
+        def _has_credentials(pid: str) -> bool:
+            pcfg = PROVIDER_REGISTRY.get(pid)
+            if not pcfg:
+                return True
+            if pcfg.auth_type in ("oauth_device_code", "oauth_external"):
+                try:
+                    from hermes_cli.auth import get_provider_auth_state
+                    state = get_provider_auth_state(pid)
+                    if state and state.get("access_token"):
+                        return True
+                except Exception:
+                    pass
+                return pid == active_provider
+            for env_var in pcfg.api_key_env_vars:
+                if os.environ.get(env_var):
+                    return True
+            return False
+
+        model_options = []
+        # Current provider models first
+        if active_provider and active_provider in _PROVIDER_MODELS:
+            for m in _PROVIDER_MODELS[active_provider]:
+                # For aggregator providers (nous, openrouter), model IDs
+                # already contain the full vendor/model path — don't double
+                # prefix.  Bare names still need the provider prefix.
+                if "/" in m:
+                    model_options.append(m)
+                else:
+                    model_options.append(f"{active_provider}/{m}")
+        # Then other available providers
+        for pid, models in _PROVIDER_MODELS.items():
+            if pid != active_provider and models and _has_credentials(pid):
+                for m in models:
+                    if "/" in m:
+                        model_options.append(m)
+                    else:
+                        model_options.append(f"{pid}/{m}")
+
+        if model_options and "model" in fields:
+            fields["model"] = {
+                "type": "select",
+                "description": "Default model",
+                "tooltip": "The AI model used for all conversations. The current provider's models are listed first. You can switch per-session with /model.",
+                "category": "general",
+                "options": model_options,
+            }
+    except Exception:
+        pass
+
+    # Also inject provider options
+    try:
+        from hermes_cli.auth import PROVIDER_REGISTRY
+        provider_options = list(PROVIDER_REGISTRY.keys())
+        # Add providers from _PROVIDER_MODELS that aren't in registry
+        from hermes_cli.models import _PROVIDER_MODELS
+        for pid in _PROVIDER_MODELS:
+            if pid not in provider_options:
+                provider_options.append(pid)
+        # Note: provider is a top-level field, not in schema overrides
+        # It's handled as a string in config. We'd need to add it to fields.
+    except Exception:
+        pass
+
+    return {"fields": fields, "category_order": _CATEGORY_ORDER}
 
 
 _EMPTY_MODEL_INFO: dict = {
@@ -588,6 +840,53 @@ _EMPTY_MODEL_INFO: dict = {
     "effective_context_length": 0,
     "capabilities": {},
 }
+
+
+@app.get("/api/models")
+def list_available_models():
+    """Return available models grouped by provider, filtered by configured credentials."""
+    try:
+        from hermes_cli.models import _PROVIDER_MODELS
+        from hermes_cli.auth import PROVIDER_REGISTRY, get_active_provider
+
+        cfg = load_config()
+        current_provider = cfg.get("provider", "")
+        active_provider = get_active_provider() or current_provider
+
+        def _has_credentials(pid: str) -> bool:
+            """Check if provider has API key or OAuth credentials available."""
+            pcfg = PROVIDER_REGISTRY.get(pid)
+            if not pcfg:
+                # Unknown provider — include it (might be custom)
+                return True
+            if pcfg.auth_type == "oauth_device_code" or pcfg.auth_type == "oauth_external":
+                # OAuth providers — check auth store
+                try:
+                    from hermes_cli.auth import get_provider_auth_state
+                    state = get_provider_auth_state(pid)
+                    if state and state.get("access_token"):
+                        return True
+                except Exception:
+                    pass
+                # Also check if it's the active provider (might have token in memory)
+                return pid == active_provider
+            # API key providers — check env vars
+            for env_var in pcfg.api_key_env_vars:
+                if os.environ.get(env_var):
+                    return True
+            return False
+
+        providers = {}
+        for pid, models in _PROVIDER_MODELS.items():
+            if models and _has_credentials(pid):
+                providers[pid] = list(models)
+
+        return {
+            "current_provider": active_provider,
+            "providers": providers,
+        }
+    except Exception:
+        return {"current_provider": "", "providers": {}}
 
 
 @app.get("/api/model/info")
@@ -1710,6 +2009,286 @@ async def delete_session_endpoint(session_id: str):
 
 
 # ---------------------------------------------------------------------------
+# Agent lifecycle — spawn, stream, and stop agents
+# ---------------------------------------------------------------------------
+
+import threading
+import queue
+
+# Track running agents: session_id -> info dict
+_running_agents: Dict[str, Dict[str, Any]] = {}
+_agents_lock = threading.Lock()
+
+# Event queues for SSE streaming: session_id -> queue.Queue
+_event_queues: Dict[str, queue.Queue] = {}
+_queues_lock = threading.Lock()
+
+
+def _get_event_queue(session_id: str) -> queue.Queue:
+    """Get or create an event queue for a session."""
+    with _queues_lock:
+        if session_id not in _event_queues:
+            _event_queues[session_id] = queue.Queue(maxsize=1000)
+        return _event_queues[session_id]
+
+
+def _push_event(session_id: str, event_type: str, **data):
+    """Push an event to all listeners for a session."""
+    q = _get_event_queue(session_id)
+    event = {"type": event_type, "ts": time.time(), **data}
+    try:
+        q.put_nowait(event)
+    except queue.Full:
+        pass  # Drop oldest events if queue is full
+
+
+def _run_agent_background(
+    session_id: str,
+    goal: str,
+    model: str | None,
+    max_iterations: int,
+):
+    """Run an agent conversation in a background thread with streaming."""
+    try:
+        from run_agent import AIAgent
+        from hermes_cli.config import load_config
+
+        config = load_config()
+        model_cfg = config.get("model", "")
+        if isinstance(model_cfg, dict):
+            model_name = model_cfg.get("default", "")
+        else:
+            model_name = str(model_cfg)
+
+        # Build callbacks that push events to the stream queue
+        def _on_tool_start(tool_name, args_preview=""):
+            _push_event(session_id, "tool_start",
+                        tool=tool_name, args=str(args_preview)[:300])
+            with _agents_lock:
+                if session_id in _running_agents:
+                    _running_agents[session_id]["current_tool"] = tool_name
+
+        def _on_tool_complete(tool_name, result_preview="", duration=0):
+            _push_event(session_id, "tool_complete",
+                        tool=tool_name,
+                        result=str(result_preview)[:300],
+                        duration_ms=int(duration * 1000) if duration else 0)
+
+        def _on_stream_delta(text):
+            if text:
+                _push_event(session_id, "text_delta", text=str(text)[:500])
+
+        def _on_step(iteration, prev_tools):
+            _push_event(session_id, "step",
+                        iteration=iteration, max_iterations=max_iterations)
+            with _agents_lock:
+                if session_id in _running_agents:
+                    _running_agents[session_id]["iteration"] = iteration
+
+        agent = AIAgent(
+            model=model or model_name,
+            max_iterations=max_iterations,
+            platform="dashboard",
+            session_id=session_id,
+            quiet_mode=True,
+            skip_context_files=True,
+            tool_start_callback=_on_tool_start,
+            tool_complete_callback=_on_tool_complete,
+            stream_delta_callback=_on_stream_delta,
+            step_callback=_on_step,
+        )
+
+        with _agents_lock:
+            if session_id in _running_agents:
+                _running_agents[session_id]["agent"] = agent
+                _running_agents[session_id]["status"] = "running"
+
+        _push_event(session_id, "status", state="running")
+        result = agent.run_conversation(user_message=goal)
+
+        with _agents_lock:
+            if session_id in _running_agents:
+                _running_agents[session_id]["status"] = "completed"
+                _running_agents[session_id]["finished_at"] = time.time()
+                _running_agents[session_id]["result"] = (
+                    result.get("final_response", "")[:500] if result else ""
+                )
+
+        _push_event(session_id, "status", state="completed",
+                    result=_running_agents.get(session_id, {}).get("result", ""))
+
+    except Exception as e:
+        _log.exception("Agent %s failed", session_id)
+        with _agents_lock:
+            if session_id in _running_agents:
+                _running_agents[session_id]["status"] = "failed"
+                _running_agents[session_id]["finished_at"] = time.time()
+                _running_agents[session_id]["error"] = str(e)[:200]
+        _push_event(session_id, "status", state="failed",
+                    error=str(e)[:200])
+
+
+class AgentSpawnRequest(BaseModel):
+    goal: str
+    model: str = ""
+    max_iterations: int = 90
+
+
+@app.post("/api/agents")
+async def spawn_agent(body: AgentSpawnRequest):
+    """Spawn a new agent in the background."""
+    import uuid
+    now = time.time()
+    short_id = uuid.uuid4().hex[:8]
+    ts_str = time.strftime("%Y%m%d_%H%M%S", time.gmtime(now))
+    session_id = f"web_{ts_str}_{short_id}"
+
+    with _agents_lock:
+        _running_agents[session_id] = {
+            "session_id": session_id,
+            "goal": body.goal[:200],
+            "model": body.model,
+            "max_iterations": body.max_iterations,
+            "status": "starting",
+            "started_at": now,
+            "finished_at": None,
+            "error": None,
+            "result": None,
+            "agent": None,
+            "thread": None,
+            "current_tool": None,
+            "iteration": 0,
+        }
+
+    # Initialize event queue
+    _get_event_queue(session_id)
+    _push_event(session_id, "status", state="starting")
+
+    thread = threading.Thread(
+        target=_run_agent_background,
+        args=(session_id, body.goal, body.model or None, body.max_iterations),
+        daemon=True,
+        name=f"agent-{session_id}",
+    )
+
+    with _agents_lock:
+        _running_agents[session_id]["thread"] = thread
+
+    thread.start()
+
+    return JSONResponse(
+        {
+            "session_id": session_id,
+            "goal": body.goal[:200],
+            "status": "starting",
+        },
+        status_code=201,
+    )
+
+
+@app.get("/api/agents")
+async def list_agents():
+    """List all tracked agents (running + recently completed)."""
+    with _agents_lock:
+        agents = []
+        for sid, info in _running_agents.items():
+            agents.append({
+                "session_id": info["session_id"],
+                "goal": info["goal"],
+                "model": info["model"],
+                "status": info["status"],
+                "started_at": info["started_at"],
+                "finished_at": info["finished_at"],
+                "error": info.get("error"),
+                "result": info.get("result"),
+                "current_tool": info.get("current_tool"),
+                "iteration": info.get("iteration", 0),
+            })
+    agents.sort(key=lambda a: (
+        0 if a["status"] in ("starting", "running") else 1,
+        -(a["started_at"] or 0),
+    ))
+    return {"agents": agents}
+
+
+@app.get("/api/agents/{session_id}/stream")
+async def stream_agent_events(session_id: str):
+    """SSE endpoint — streams real-time agent events."""
+    from starlette.responses import StreamingResponse
+
+    async def event_generator():
+        q = _get_event_queue(session_id)
+        # Send any existing events first
+        while True:
+            try:
+                event = q.get_nowait()
+                yield f"data: {json.dumps(event)}\n\n"
+            except queue.Empty:
+                break
+
+        # Now stream live events with heartbeat
+        last_heartbeat = time.time()
+        while True:
+            try:
+                event = q.get(timeout=1.0)
+                yield f"data: {json.dumps(event)}\n\n"
+                last_heartbeat = time.time()
+            except queue.Empty:
+                # Send heartbeat every 5s to keep connection alive
+                if time.time() - last_heartbeat > 5:
+                    yield f"data: {json.dumps({'type': 'heartbeat', 'ts': time.time()})}\n\n"
+                    last_heartbeat = time.time()
+                # Check if agent is done
+                with _agents_lock:
+                    info = _running_agents.get(session_id)
+                if info and info["status"] in ("completed", "failed", "stopped"):
+                    # Drain remaining events
+                    while True:
+                        try:
+                            event = q.get_nowait()
+                            yield f"data: {json.dumps(event)}\n\n"
+                        except queue.Empty:
+                            break
+                    return
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.post("/api/agents/{session_id}/stop")
+async def stop_agent(session_id: str):
+    """Interrupt a running agent."""
+    with _agents_lock:
+        info = _running_agents.get(session_id)
+    if not info:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if info["status"] not in ("starting", "running"):
+        raise HTTPException(status_code=400, detail=f"Agent is {info['status']}, not running")
+
+    agent = info.get("agent")
+    if agent:
+        try:
+            agent.interrupt("Stopped from dashboard")
+        except Exception:
+            pass
+
+    with _agents_lock:
+        if session_id in _running_agents:
+            _running_agents[session_id]["status"] = "stopped"
+            _running_agents[session_id]["finished_at"] = time.time()
+
+    _push_event(session_id, "status", state="stopped")
+    return {"ok": True, "session_id": session_id, "status": "stopped"}
+
+
+# ---------------------------------------------------------------------------
 # Log viewer endpoint
 # ---------------------------------------------------------------------------
 
@@ -2021,6 +2600,364 @@ async def get_usage_analytics(days: int = 30):
         db.close()
 
 
+@app.get("/api/activity")
+async def get_activity(limit: int = 50, offset: int = 0):
+    """Aggregate activity events from sessions and cron jobs."""
+    from hermes_state import SessionDB
+
+    events = []
+
+    # Session events
+    db = SessionDB()
+    try:
+        now = time.time()
+        cutoff = now - 86400 * 7  # last 7 days
+        cur = db._conn.execute(
+            """SELECT id, title, source, model, message_count,
+                      started_at, ended_at,
+                      COALESCE(
+                          (SELECT MAX(m2.timestamp) FROM messages m2 WHERE m2.session_id = sessions.id),
+                          started_at
+                      ) AS last_active
+               FROM sessions WHERE started_at > ?
+               ORDER BY last_active DESC LIMIT ?""",
+            (cutoff, 100),
+        )
+        for row in cur.fetchall():
+            r = dict(row)
+            is_active = r.get("ended_at") is None and (
+                now - (r.get("last_active") or r.get("started_at") or 0)
+            ) < 300
+            events.append({
+                "id": f"session_{r['id']}",
+                "type": "session",
+                "action": "active" if is_active else "completed",
+                "title": r.get("title") or "Untitled session",
+                "source": r.get("source") or "cli",
+                "timestamp": r.get("last_active") or r.get("started_at"),
+                "details": {
+                    "session_id": r["id"],
+                    "model": r.get("model"),
+                    "message_count": r.get("message_count", 0),
+                },
+            })
+    finally:
+        db.close()
+
+    # Cron job events
+    try:
+        from cron.jobs import list_jobs
+        for job in list_jobs():
+            events.append({
+                "id": f"cron_{job.get('id', '')}",
+                "type": "cron",
+                "action": "enabled" if job.get("enabled") else "paused",
+                "title": job.get("name") or job.get("prompt", "")[:80],
+                "source": "cron",
+                "timestamp": job.get("last_run_at") or job.get("next_run_at"),
+                "details": {
+                    "job_id": job.get("id"),
+                    "schedule": job.get("schedule_display"),
+                    "enabled": job.get("enabled"),
+                },
+            })
+    except Exception:
+        pass
+
+    # Sort by timestamp descending (most recent first)
+    events.sort(key=lambda e: e.get("timestamp") or 0, reverse=True)
+
+    return {
+        "events": events[offset : offset + limit],
+        "total": len(events),
+    }
+
+
+@app.get("/api/skills/marketplace")
+async def api_skills_marketplace(q: str = "", limit: int = 20):
+    """Search skill registries (ClawHub, GitHub, etc.)."""
+    try:
+        from tools.skills_hub import GitHubAuth, create_source_router, unified_search
+        auth = GitHubAuth()
+        sources = create_source_router(auth)
+        results = unified_search(q or "agent", sources, source_filter="all", limit=limit)
+        return {
+            "skills": [
+                {
+                    "name": r.name,
+                    "description": r.description,
+                    "source": r.source,
+                    "identifier": r.identifier,
+                    "trust_level": r.trust_level,
+                    "tags": r.tags,
+                }
+                for r in results
+            ],
+            "query": q,
+        }
+    except Exception as e:
+        return {"skills": [], "query": q, "error": str(e)}
+
+
+@app.post("/api/skills/install")
+async def api_install_skill(request: Request):
+    """Install a skill from the marketplace."""
+    data = await request.json()
+    identifier = data.get("identifier", "")
+    if not identifier:
+        raise HTTPException(status_code=400, detail="identifier is required")
+
+    import io
+    import sys
+
+    # Capture console output from do_install
+    buf = io.StringIO()
+    try:
+        from hermes_cli.skills_hub import do_install
+        from rich.console import Console
+        console = Console(file=buf, force_terminal=False, no_color=True)
+
+        do_install(
+            identifier=identifier,
+            category=data.get("category", ""),
+            force=data.get("force", False),
+            console=console,
+            skip_confirm=True,
+        )
+
+        output = buf.getvalue()
+        success = "installed" in output.lower() or "already installed" in output.lower()
+        return {
+            "ok": success,
+            "identifier": identifier,
+            "output": output[-1000:] if output else "",
+        }
+    except Exception as e:
+        return {"ok": False, "identifier": identifier, "error": str(e)}
+
+
+@app.delete("/api/skills/{skill_name}")
+async def api_uninstall_skill(skill_name: str):
+    """Uninstall a skill."""
+    import io
+    buf = io.StringIO()
+    try:
+        from hermes_cli.skills_hub import do_uninstall
+        from rich.console import Console
+        console = Console(file=buf, force_terminal=False, no_color=True)
+        do_uninstall(skill_name, console=console)
+        return {"ok": True, "name": skill_name, "output": buf.getvalue()[-500:]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Boards & Tasks ───────────────────────────────────────────────────
+
+from .boards_db import (
+    create_board, list_boards, get_board, update_board, delete_board,
+    create_task, list_tasks, get_task, update_task, delete_task,
+)
+
+
+@app.get("/api/boards")
+async def api_list_boards():
+    return {"boards": list_boards()}
+
+
+@app.post("/api/boards")
+async def api_create_board(request: Request):
+    data = await request.json()
+    board = create_board(
+        name=data.get("name", "Untitled"),
+        description=data.get("description", ""),
+        color=data.get("color", "#00ff88"),
+    )
+    return JSONResponse(board, status_code=201)
+
+
+@app.get("/api/boards/{board_id}")
+async def api_get_board(board_id: str):
+    board = get_board(board_id)
+    if not board:
+        raise HTTPException(status_code=404, detail="Board not found")
+    board["tasks"] = list_tasks(board_id)
+    return board
+
+
+@app.put("/api/boards/{board_id}")
+async def api_update_board(board_id: str, request: Request):
+    data = await request.json()
+    board = update_board(board_id, **data)
+    if not board:
+        raise HTTPException(status_code=404, detail="Board not found")
+    return board
+
+
+@app.delete("/api/boards/{board_id}")
+async def api_delete_board(board_id: str):
+    delete_board(board_id)
+    return {"ok": True}
+
+
+@app.post("/api/boards/{board_id}/tasks")
+async def api_create_task(board_id: str, request: Request):
+    data = await request.json()
+    task = create_task(
+        board_id=board_id,
+        title=data.get("title", "Untitled"),
+        description=data.get("description", ""),
+        status=data.get("status", "todo"),
+        priority=data.get("priority", "normal"),
+        tags=data.get("tags", []),
+    )
+    return JSONResponse(task, status_code=201)
+
+
+@app.get("/api/boards/{board_id}/tasks")
+async def api_list_tasks_for_board(board_id: str):
+    return {"tasks": list_tasks(board_id)}
+
+
+@app.put("/api/tasks/{task_id}")
+async def api_update_task(task_id: str, request: Request):
+    data = await request.json()
+    task = update_task(task_id, **data)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task
+
+
+@app.delete("/api/tasks/{task_id}")
+async def api_delete_task(task_id: str):
+    delete_task(task_id)
+    return {"ok": True}
+
+
+# ── Approvals ────────────────────────────────────────────────────────
+
+from .approvals_db import (
+    create_approval, list_approvals, resolve_approval,
+)
+
+
+@app.get("/api/approvals")
+async def api_list_approvals(status: Optional[str] = None):
+    return {"approvals": list_approvals(status)}
+
+
+@app.post("/api/approvals")
+async def api_create_approval(request: Request):
+    data = await request.json()
+    approval = create_approval(
+        session_id=data.get("session_id", ""),
+        tool_name=data.get("tool_name", ""),
+        command=data.get("command", ""),
+        risk_level=data.get("risk_level", "medium"),
+    )
+    return JSONResponse(approval, status_code=201)
+
+
+@app.put("/api/approvals/{approval_id}/approve")
+async def api_approve(approval_id: str, request: Request):
+    data = await request.json()
+    result = resolve_approval(
+        approval_id, "approved",
+        data.get("resolved_by", "web"), data.get("reason", ""),
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    return result
+
+
+@app.put("/api/approvals/{approval_id}/deny")
+async def api_deny(approval_id: str, request: Request):
+    data = await request.json()
+    result = resolve_approval(
+        approval_id, "denied",
+        data.get("resolved_by", "web"), data.get("reason", ""),
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    return result
+
+
+# ── Chat & File Upload ───────────────────────────────────────────────
+
+import os
+import uuid
+from pathlib import Path
+
+_UPLOAD_DIR = Path(get_hermes_home()) / "uploads"
+_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+_PENDING_DIR = Path(get_hermes_home()) / "pending_messages"
+_PENDING_DIR.mkdir(parents=True, exist_ok=True)
+
+
+@app.post("/api/upload")
+async def api_upload_file(request: Request):
+    """Upload a file. Returns the saved path accessible to the agent."""
+    form = await request.form()
+    upload = form.get("file")
+    if not upload:
+        raise HTTPException(status_code=400, detail="No file provided")
+    filename = getattr(upload, "filename", "upload.bin")
+    # Sanitize filename
+    safe_name = f"{uuid.uuid4().hex[:8]}_{Path(filename).name}"
+    dest = _UPLOAD_DIR / safe_name
+    content = await upload.read()
+    if len(content) > 50 * 1024 * 1024:  # 50MB limit
+        raise HTTPException(status_code=413, detail="File too large (max 50MB)")
+    dest.write_bytes(content)
+    return {
+        "ok": True,
+        "filename": safe_name,
+        "original_name": filename,
+        "size": len(content),
+        "path": str(dest),
+    }
+
+
+@app.post("/api/chat/send")
+async def api_chat_send(request: Request):
+    """Send a message to an active session. Stores in DB + writes to pending queue."""
+    from hermes_state import SessionDB
+
+    data = await request.json()
+    session_id = data.get("session_id", "")
+    message = data.get("message", "")
+
+    if not session_id or not message:
+        raise HTTPException(status_code=400, detail="session_id and message required")
+
+    db = SessionDB()
+    try:
+        resolved = db.resolve_session_id(session_id)
+        if not resolved:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        # Store the message in DB so it appears in the session viewer
+        db.append_message(
+            session_id=resolved,
+            role="user",
+            content=message,
+        )
+
+        # Write to pending queue for gateway to pick up
+        pending_file = _PENDING_DIR / f"{resolved}.jsonl"
+        with open(pending_file, "a") as f:
+            f.write(json.dumps({
+                "session_id": resolved,
+                "message": message,
+                "timestamp": time.time(),
+                "source": "web",
+            }) + "\n")
+
+        return {"ok": True, "session_id": resolved}
+    finally:
+        db.close()
+
+
 def mount_spa(application: FastAPI):
     """Mount the built SPA. Falls back to index.html for client-side routing.
 
@@ -2293,6 +3230,362 @@ def _mount_plugin_api_routes():
             _log.info("Mounted plugin API routes: /api/plugins/%s/", plugin["name"])
         except Exception as exc:
             _log.warning("Failed to load plugin %s API routes: %s", plugin["name"], exc)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Mission Control: System Metrics, Live Monitor, Collaboration
+# ═══════════════════════════════════════════════════════════════════
+
+import psutil  # noqa: E402 — system metrics
+
+# Collaboration handoffs: list of handoff records
+_handoffs: List[Dict[str, Any]] = []
+_handoffs_lock = threading.Lock()
+
+
+@app.get("/api/system/metrics")
+async def get_system_metrics():
+    """Return current CPU, memory, disk, and network metrics."""
+    cpu_percent = psutil.cpu_percent(interval=0.1)
+    cpu_count = psutil.cpu_count()
+    cpu_per_core = psutil.cpu_percent(interval=0.1, percpu=True)
+    mem = psutil.virtual_memory()
+    swap = psutil.swap_memory()
+    disk_parts = []
+    for part in psutil.disk_partitions(all=False):
+        try:
+            usage = psutil.disk_usage(part.mountpoint)
+            disk_parts.append({
+                "device": part.device,
+                "mountpoint": part.mountpoint,
+                "fstype": part.fstype,
+                "total": usage.total,
+                "used": usage.used,
+                "free": usage.free,
+                "percent": usage.percent,
+            })
+        except PermissionError:
+            continue
+    net = psutil.net_io_counters()
+    load = os.getloadavg()
+
+    top_procs = []
+    for proc in sorted(psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent']),
+                       key=lambda p: p.info.get('cpu_percent', 0), reverse=True)[:10]:
+        try:
+            top_procs.append({
+                "pid": proc.info['pid'],
+                "name": proc.info['name'],
+                "cpu_percent": proc.info['cpu_percent'],
+                "memory_percent": round(proc.info['memory_percent'], 1),
+            })
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+
+    return {
+        "timestamp": time.time(),
+        "cpu": {
+            "percent": cpu_percent,
+            "count": cpu_count,
+            "per_core": cpu_per_core,
+            "load_avg": {"1m": load[0], "5m": load[1], "15m": load[2]},
+        },
+        "memory": {
+            "total": mem.total,
+            "available": mem.available,
+            "used": mem.used,
+            "percent": mem.percent,
+            "swap_total": swap.total,
+            "swap_used": swap.used,
+            "swap_percent": swap.percent,
+        },
+        "disks": disk_parts,
+        "network": {
+            "bytes_sent": net.bytes_sent,
+            "bytes_recv": net.bytes_recv,
+            "packets_sent": net.packets_sent,
+            "packets_recv": net.packets_recv,
+        },
+        "top_processes": top_procs,
+    }
+
+
+@app.get("/api/system/metrics/history")
+async def get_metrics_history(seconds: int = 300):
+    """Return CPU/memory history for the last N seconds (max 3600)."""
+    if not hasattr(get_metrics_history, "_buf"):
+        get_metrics_history._buf = []  # type: ignore
+        get_metrics_history._last_sample = 0.0  # type: ignore
+
+    buf = get_metrics_history._buf  # type: ignore
+    now = time.time()
+
+    if now - get_metrics_history._last_sample >= 1:  # type: ignore
+        buf.append({
+            "ts": now,
+            "cpu": psutil.cpu_percent(interval=0),
+            "mem": psutil.virtual_memory().percent,
+        })
+        cutoff = now - 3600
+        while buf and buf[0]["ts"] < cutoff:
+            buf.pop(0)
+        get_metrics_history._last_sample = now  # type: ignore
+
+    cutoff = now - min(seconds, 3600)
+    return {"samples": [s for s in buf if s["ts"] >= cutoff], "interval": 1}
+
+
+@app.get("/api/monitor/sessions")
+async def get_monitor_sessions():
+    """Return all active sessions with live agent status for the monitor."""
+    from hermes_state import SessionDB
+    db = SessionDB()
+    try:
+        sessions = db.list_sessions_rich(limit=100, offset=0)
+        now = time.time()
+        active = []
+        for s in sessions:
+            is_active = (
+                s.get("ended_at") is None
+                and (now - s.get("last_active", s.get("started_at", 0))) < 300
+            )
+            if not is_active:
+                continue
+            sid = s["id"]
+            entry = {
+                "id": sid,
+                "source": s.get("source"),
+                "model": s.get("model"),
+                "title": s.get("title"),
+                "started_at": s.get("started_at"),
+                "last_active": s.get("last_active"),
+                "message_count": s.get("message_count", 0),
+                "tool_call_count": s.get("tool_call_count", 0),
+                "input_tokens": s.get("input_tokens", 0),
+                "output_tokens": s.get("output_tokens", 0),
+            }
+            with _agents_lock:
+                agent_info = _running_agents.get(sid)
+            if agent_info:
+                entry["agent_status"] = agent_info.get("status")
+                entry["current_tool"] = agent_info.get("current_tool")
+                entry["iteration"] = agent_info.get("iteration", 0)
+                entry["error"] = agent_info.get("error")
+            active.append(entry)
+        return {"sessions": active}
+    finally:
+        db.close()
+
+
+@app.get("/api/monitor/stream")
+async def monitor_all_sessions_stream():
+    """SSE endpoint — streams events from ALL active agent sessions."""
+    from starlette.responses import StreamingResponse
+
+    async def event_generator():
+        watched: Dict[str, queue.Queue] = {}
+        last_heartbeat = time.time()
+
+        while True:
+            with _agents_lock:
+                active_ids = set(_running_agents.keys())
+
+            for sid in active_ids:
+                if sid not in watched:
+                    watched[sid] = _get_event_queue(sid)
+                    yield f"data: {json.dumps({'type': 'session_join', 'session_id': sid})}\n\n"
+
+            for sid in list(watched.keys()):
+                if sid not in active_ids:
+                    del watched[sid]
+                    yield f"data: {json.dumps({'type': 'session_leave', 'session_id': sid})}\n\n"
+
+            got_event = False
+            for sid, q in list(watched.items()):
+                try:
+                    while True:
+                        event = q.get_nowait()
+                        event["session_id"] = sid
+                        yield f"data: {json.dumps(event)}\n\n"
+                        got_event = True
+                except queue.Empty:
+                    pass
+
+            if not got_event:
+                await asyncio.sleep(0.2)
+
+            if time.time() - last_heartbeat > 5:
+                yield f"data: {json.dumps({'type': 'heartbeat', 'ts': time.time()})}\n\n"
+                last_heartbeat = time.time()
+
+            # Never close the SSE connection — keep polling for new sessions.
+            # If no agents are running, just idle with longer sleep.
+            if not active_ids and not watched:
+                await asyncio.sleep(1)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+class HandoffRequest(BaseModel):
+    from_session: str
+    to_session: Optional[str] = None
+    task: str
+    context: Optional[str] = None
+    priority: str = "normal"
+
+
+@app.post("/api/collaboration/handoff")
+async def create_handoff(req: HandoffRequest):
+    """Create a task handoff between agents or spawn a new agent."""
+    handoff_id = secrets.token_hex(8)
+    record = {
+        "id": handoff_id,
+        "from_session": req.from_session,
+        "to_session": req.to_session,
+        "task": req.task,
+        "context": req.context,
+        "priority": req.priority,
+        "status": "pending",
+        "created_at": time.time(),
+        "accepted_at": None,
+        "completed_at": None,
+    }
+    with _handoffs_lock:
+        _handoffs.append(record)
+
+    if not req.to_session:
+        goal = req.task
+        if req.context:
+            goal = f"[Handoff from {req.from_session[:12]}]\nContext: {req.context}\n\nTask: {req.task}"
+
+        with _agents_lock:
+            agent_session_id = f"handoff-{handoff_id}"
+            _running_agents[agent_session_id] = {
+                "status": "starting",
+                "session_id": agent_session_id,
+                "started_at": time.time(),
+                "current_tool": None,
+                "iteration": 0,
+                "error": None,
+                "result": None,
+            }
+
+        def _run_handoff_agent():
+            try:
+                from run_agent import AIAgent
+                agent = AIAgent(
+                    model=model_name,
+                    max_iterations=50,
+                    platform="dashboard",
+                    session_id=agent_session_id,
+                    enabled_toolsets=["terminal", "file", "web", "browser"],
+                )
+                with _agents_lock:
+                    _running_agents[agent_session_id]["status"] = "running"
+                    _running_agents[agent_session_id]["agent"] = agent
+
+                result = agent.run_conversation(goal)
+
+                with _agents_lock:
+                    if agent_session_id in _running_agents:
+                        _running_agents[agent_session_id]["status"] = "completed"
+                        _running_agents[agent_session_id]["result"] = str(result)[:500]
+                with _handoffs_lock:
+                    for h in _handoffs:
+                        if h["id"] == handoff_id:
+                            h["status"] = "completed"
+                            h["completed_at"] = time.time()
+                            h["to_session"] = agent_session_id
+                            break
+            except Exception as exc:
+                with _agents_lock:
+                    if agent_session_id in _running_agents:
+                        _running_agents[agent_session_id]["status"] = "failed"
+                        _running_agents[agent_session_id]["error"] = str(exc)[:300]
+                with _handoffs_lock:
+                    for h in _handoffs:
+                        if h["id"] == handoff_id:
+                            h["status"] = "failed"
+                            break
+
+        threading.Thread(target=_run_handoff_agent, daemon=True).start()
+        record["to_session"] = agent_session_id
+        record["status"] = "in_progress"
+
+    return record
+
+
+@app.get("/api/collaboration/handoffs")
+async def list_handoffs(status: Optional[str] = None):
+    """List all handoff records, optionally filtered by status."""
+    with _handoffs_lock:
+        items = list(_handoffs)
+    if status:
+        items = [h for h in items if h["status"] == status]
+    items.sort(key=lambda h: h["created_at"], reverse=True)
+    return {"handoffs": items}
+
+
+@app.post("/api/collaboration/handoffs/{handoff_id}/accept")
+async def accept_handoff(handoff_id: str):
+    """Accept a pending handoff."""
+    with _handoffs_lock:
+        for h in _handoffs:
+            if h["id"] == handoff_id:
+                h["status"] = "in_progress"
+                h["accepted_at"] = time.time()
+                return h
+    raise HTTPException(status_code=404, detail="Handoff not found")
+
+
+@app.post("/api/collaboration/handoffs/{handoff_id}/complete")
+async def complete_handoff(handoff_id: str):
+    """Mark a handoff as completed."""
+    with _handoffs_lock:
+        for h in _handoffs:
+            if h["id"] == handoff_id:
+                h["status"] = "completed"
+                h["completed_at"] = time.time()
+                return h
+    raise HTTPException(status_code=404, detail="Handoff not found")
+
+
+@app.get("/api/collaboration/graph")
+async def collaboration_graph():
+    """Return a graph of agent collaborations for visualization."""
+    with _handoffs_lock:
+        items = list(_handoffs)
+
+    nodes = {}
+    edges = []
+    for h in items:
+        src = h["from_session"]
+        dst = h.get("to_session")
+        if src not in nodes:
+            nodes[src] = {"id": src, "label": src[:12], "handoffs_out": 0, "handoffs_in": 0}
+        nodes[src]["handoffs_out"] += 1
+        if dst:
+            if dst not in nodes:
+                nodes[dst] = {"id": dst, "label": dst[:12], "handoffs_out": 0, "handoffs_in": 0}
+            nodes[dst]["handoffs_in"] += 1
+            edges.append({
+                "id": h["id"],
+                "from": src,
+                "to": dst,
+                "task": h["task"][:80],
+                "status": h["status"],
+                "created_at": h["created_at"],
+            })
+
+    return {"nodes": list(nodes.values()), "edges": edges}
 
 
 # Mount plugin API routes before the SPA catch-all.
