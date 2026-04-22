@@ -1,185 +1,276 @@
-<p align="center">
-  <img src="assets/banner.png" alt="Hermes Agent" width="100%">
-</p>
+# Hermes Mission Control
 
-# Hermes Agent ☤
+**An enhanced dashboard for [Hermes Agent](https://github.com/NousResearch/hermes-agent) — live monitoring, system resources, agent collaboration, and a command palette.**
 
-<p align="center">
-  <a href="https://hermes-agent.nousresearch.com/docs/"><img src="https://img.shields.io/badge/Docs-hermes--agent.nousresearch.com-FFD700?style=for-the-badge" alt="Documentation"></a>
-  <a href="https://discord.gg/NousResearch"><img src="https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
-  <a href="https://github.com/NousResearch/hermes-agent/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License: MIT"></a>
-  <a href="https://nousresearch.com"><img src="https://img.shields.io/badge/Built%20by-Nous%20Research-blueviolet?style=for-the-badge" alt="Built by Nous Research"></a>
-</p>
-
-**The self-improving AI agent built by [Nous Research](https://nousresearch.com).** It's the only agent with a built-in learning loop — it creates skills from experience, improves them during use, nudges itself to persist knowledge, searches its own past conversations, and builds a deepening model of who you are across sessions. Run it on a $5 VPS, a GPU cluster, or serverless infrastructure that costs nearly nothing when idle. It's not tied to your laptop — talk to it from Telegram while it works on a cloud VM.
-
-Use any model you want — [Nous Portal](https://portal.nousresearch.com), [OpenRouter](https://openrouter.ai) (200+ models), [NVIDIA NIM](https://build.nvidia.com) (Nemotron), [Xiaomi MiMo](https://platform.xiaomimimo.com), [z.ai/GLM](https://z.ai), [Kimi/Moonshot](https://platform.moonshot.ai), [MiniMax](https://www.minimax.io), [Hugging Face](https://huggingface.co), OpenAI, or your own endpoint. Switch with `hermes model` — no code changes, no lock-in.
-
-<table>
-<tr><td><b>A real terminal interface</b></td><td>Full TUI with multiline editing, slash-command autocomplete, conversation history, interrupt-and-redirect, and streaming tool output.</td></tr>
-<tr><td><b>Lives where you do</b></td><td>Telegram, Discord, Slack, WhatsApp, Signal, and CLI — all from a single gateway process. Voice memo transcription, cross-platform conversation continuity.</td></tr>
-<tr><td><b>A closed learning loop</b></td><td>Agent-curated memory with periodic nudges. Autonomous skill creation after complex tasks. Skills self-improve during use. FTS5 session search with LLM summarization for cross-session recall. <a href="https://github.com/plastic-labs/honcho">Honcho</a> dialectic user modeling. Compatible with the <a href="https://agentskills.io">agentskills.io</a> open standard.</td></tr>
-<tr><td><b>Scheduled automations</b></td><td>Built-in cron scheduler with delivery to any platform. Daily reports, nightly backups, weekly audits — all in natural language, running unattended.</td></tr>
-<tr><td><b>Delegates and parallelizes</b></td><td>Spawn isolated subagents for parallel workstreams. Write Python scripts that call tools via RPC, collapsing multi-step pipelines into zero-context-cost turns.</td></tr>
-<tr><td><b>Runs anywhere, not just your laptop</b></td><td>Six terminal backends — local, Docker, SSH, Daytona, Singularity, and Modal. Daytona and Modal offer serverless persistence — your agent's environment hibernates when idle and wakes on demand, costing nearly nothing between sessions. Run it on a $5 VPS or a GPU cluster.</td></tr>
-<tr><td><b>Research-ready</b></td><td>Batch trajectory generation, Atropos RL environments, trajectory compression for training the next generation of tool-calling models.</td></tr>
-</table>
+> Built on top of the stock Hermes web dashboard. All original pages and functionality remain. This adds new pages, a new navigation system, and real-time operations tooling.
 
 ---
 
-## Quick Install
+## What is this?
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
+Mission Control extends the Hermes Agent web dashboard with features the stock dashboard doesn't have:
+
+| Feature | Stock Dashboard | Mission Control |
+|---------|:-:|:-:|
+| Session list | ✅ | ✅ |
+| Config editor | ✅ | ✅ |
+| Cron management | ✅ | ✅ |
+| Skills marketplace | ✅ | ✅ |
+| **Live agent monitoring (SSE)** | ❌ | ✅ |
+| **System resource metrics** | ❌ | ✅ |
+| **Agent-to-agent collaboration** | ❌ | ✅ |
+| **Command palette (Ctrl+K)** | ❌ | ✅ |
+| **Grouped sidebar with favorites** | ❌ | ✅ |
+| **Customizable widget home** | ❌ | ✅ |
+
+---
+
+## Screenshots
+
+The new home dashboard shows system health, active sessions, gateway status, and quick actions — all in customizable widgets.
+
+The command palette (`Ctrl+K`) lets you jump to any page instantly:
+
 ```
-
-Works on Linux, macOS, WSL2, and Android via Termux. The installer handles the platform-specific setup for you.
-
-> **Android / Termux:** The tested manual path is documented in the [Termux guide](https://hermes-agent.nousresearch.com/docs/getting-started/termux). On Termux, Hermes installs a curated `.[termux]` extra because the full `.[all]` extra currently pulls Android-incompatible voice dependencies.
->
-> **Windows:** Native Windows is not supported. Please install [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) and run the command above.
-
-After installation:
-
-```bash
-source ~/.bashrc    # reload shell (or: source ~/.zshrc)
-hermes              # start chatting!
+┌─────────────────────────────────────────────┐
+│ 🔍 Search pages, sessions, skills...    ESC │
+├─────────────────────────────────────────────┤
+│ ⭐ Favorites                                │
+│ → Live Monitor              Operations      │
+│ → Resources                 Infrastructure  │
+│                                               │
+│ 🕐 Recent                                   │
+│ → Settings                  Config           │
+│ → Sessions                  Operations       │
+├─────────────────────────────────────────────┤
+│ ↑↓ navigate  ↵ open              ⌘K toggle │
+└─────────────────────────────────────────────┘
 ```
 
 ---
 
-## Getting Started
+## Quick Start
+
+### Prerequisites
+
+- [Hermes Agent](https://github.com/NousResearch/hermes-agent) already installed
+- Python 3.11+
+- Node.js 18+
+- `psutil` Python package
+
+### 1. Install psutil
 
 ```bash
-hermes              # Interactive CLI — start a conversation
-hermes model        # Choose your LLM provider and model
-hermes tools        # Configure which tools are enabled
-hermes config set   # Set individual config values
-hermes gateway      # Start the messaging gateway (Telegram, Discord, etc.)
-hermes setup        # Run the full setup wizard (configures everything at once)
-hermes claw migrate # Migrate from OpenClaw (if coming from OpenClaw)
-hermes update       # Update to the latest version
-hermes doctor       # Diagnose any issues
+cd ~/.hermes/hermes-agent
+source venv/bin/activate
+pip install psutil
 ```
 
-📖 **[Full documentation →](https://hermes-agent.nousresearch.com/docs/)**
+### 2. Clone this repo (or pull the feature branch)
 
-## CLI vs Messaging Quick Reference
+```bash
+git clone https://github.com/H22Designs/hermes-agent.git
+cd hermes-agent
+git checkout feat/mission-control
+```
 
-Hermes has two entry points: start the terminal UI with `hermes`, or run the gateway and talk to it from Telegram, Discord, Slack, WhatsApp, Signal, or Email. Once you're in a conversation, many slash commands are shared across both interfaces.
+### 3. Build the frontend
 
-| Action | CLI | Messaging platforms |
-|---------|-----|---------------------|
-| Start chatting | `hermes` | Run `hermes gateway setup` + `hermes gateway start`, then send the bot a message |
-| Start fresh conversation | `/new` or `/reset` | `/new` or `/reset` |
-| Change model | `/model [provider:model]` | `/model [provider:model]` |
-| Set a personality | `/personality [name]` | `/personality [name]` |
-| Retry or undo the last turn | `/retry`, `/undo` | `/retry`, `/undo` |
-| Compress context / check usage | `/compress`, `/usage`, `/insights [--days N]` | `/compress`, `/usage`, `/insights [days]` |
-| Browse skills | `/skills` or `/<skill-name>` | `/skills` or `/<skill-name>` |
-| Interrupt current work | `Ctrl+C` or send a new message | `/stop` or send a new message |
-| Platform-specific status | `/platforms` | `/status`, `/sethome` |
+```bash
+cd web
+npm install
+npm run build
+```
 
-For the full command lists, see the [CLI guide](https://hermes-agent.nousresearch.com/docs/user-guide/cli) and the [Messaging Gateway guide](https://hermes-agent.nousresearch.com/docs/user-guide/messaging).
+### 4. Start the dashboard
+
+```bash
+cd ..
+source venv/bin/activate
+python -m hermes_cli.main dashboard --host 0.0.0.0 --port 9119 --insecure
+```
+
+### 5. Open in browser
+
+Go to `http://localhost:9119`. You should see the new sidebar and home dashboard. Press `Ctrl+K` to open the command palette.
+
+---
+
+## Features
+
+### Command Palette
+
+Press `Ctrl+K` (or `Cmd+K` on Mac) from anywhere to search and navigate.
+
+- Searches all 20 pages by name, keywords, and category
+- Shows starred favorites when empty
+- Shows recently visited pages
+- Star pages directly from search results
+- Arrow keys + Enter to navigate
+
+### Grouped Sidebar
+
+Pages are organized into 5 collapsible sections:
+
+- **Home** — Overview, Dashboard
+- **Operations** — Live Monitor, Sessions, Agent Chat, Agents
+- **Infrastructure** — Resources, Gateway, Status, Logs
+- **Management** — Boards, Approvals, Cron, Skills, Marketplace, Collaboration
+- **Config** — Analytics, Activity, Settings, API Keys
+
+Click any section header to collapse/expand. Star pages to pin them above the groups.
+
+### Home Dashboard
+
+A customizable widget-based overview at `/`:
+
+| Widget | What it shows |
+|--------|--------------|
+| **System Health** | CPU, RAM, disk usage bars (auto-refresh 5s) |
+| **Gateway** | Running status + platform connections |
+| **Active Sessions** | Live agent sessions with status |
+| **Quick Actions** | 6-button grid for common navigation |
+| **Collaboration** | Pending/active/completed handoff counts |
+
+Click "Customize" to toggle widgets on/off. State persists in localStorage.
+
+### Live Monitor
+
+Real-time monitoring at `/connect` using Server-Sent Events:
+
+- See all active agent sessions in one place
+- Watch tool calls stream in live
+- See tool duration, errors, and session lifecycle events
+- Auto-reconnects on disconnect
+
+### Resource Usage
+
+Live system metrics at `/resources`:
+
+- **CPU** — overall %, per-core bars, load averages, sparkline history
+- **Memory** — used/total, swap, sparkline history
+- **Disk** — all mountpoints with usage bars
+- **Network** — total bytes + live throughput rate
+- **Top Processes** — by CPU and memory usage
+
+Refreshes every 3 seconds.
+
+### Collaboration
+
+Agent-to-agent task delegation at `/collaboration`:
+
+1. Click "New Handoff"
+2. Write a task description and optional context
+3. Click "Spawn Agent"
+4. A new agent thread is created to execute the task
+5. Track the handoff through its lifecycle: pending → in_progress → completed
+
+Includes a visual graph of agent-to-agent connections.
+
+---
+
+## Installation on Existing Hermes
+
+Mission Control is designed to be installed **on top of** an existing Hermes installation. It does not:
+
+- Modify your `config.yaml`
+- Change your sessions, skills, or memory
+- Alter any existing dashboard pages
+- Require database migrations
+
+### What it changes
+
+| File | What changed |
+|------|-------------|
+| `hermes_cli/web_server.py` | 11 new API endpoints added at the end |
+| `web/src/App.tsx` | New layout with sidebar |
+| `web/src/lib/api.ts` | New types and API methods |
+| `web/src/components/` | 2 new components (CommandPalette, Sidebar) |
+| `web/src/pages/` | 4 new pages (Home, Monitor, Resources, Collaboration) |
+
+### Rollback
+
+If you need to revert:
+
+```bash
+cd ~/.hermes/hermes-agent
+git checkout main
+cd web && npm run build
+# Restart dashboard
+```
+
+No data is lost. The stock dashboard works exactly as before.
+
+---
+
+## New API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/system/metrics` | GET | CPU, memory, disk, network, top processes |
+| `/api/system/metrics/history` | GET | CPU/memory sparkline data (up to 1hr) |
+| `/api/monitor/sessions` | GET | Active sessions with agent status |
+| `/api/monitor/stream` | GET | SSE stream of all agent events |
+| `/api/collaboration/handoff` | POST | Create a task handoff |
+| `/api/collaboration/handoffs` | GET | List all handoffs |
+| `/api/collaboration/handoffs/{id}/accept` | POST | Accept a handoff |
+| `/api/collaboration/handoffs/{id}/complete` | POST | Complete a handoff |
+| `/api/collaboration/graph` | GET | Collaboration graph data |
+
+See [MISSION_CONTROL.md](MISSION_CONTROL.md) for full API reference with request/response examples.
+
+---
+
+## Pages
+
+| Path | Page | New? |
+|------|------|:----:|
+| `/` | Home Dashboard (widgets) | ✅ |
+| `/dashboard` | Classic Dashboard | |
+| `/monitor` | Live Monitor (SSE) | ✅ |
+| `/resources` | CPU/RAM/Disk/Network | ✅ |
+| `/sessions` | Session history | |
+| `/chat` | Agent Chat | |
+| `/agents` | Spawn/manage agents | |
+| `/gateway` | Platform connections | |
+| `/status` | System status | |
+| `/logs` | Log viewer | |
+| `/boards` | Kanban boards | |
+| `/approvals` | Pending approvals | |
+| `/cron` | Scheduled jobs | |
+| `/skills` | Installed skills | |
+| `/marketplace` | Browse/install skills | |
+| `/collaboration` | Agent handoffs | ✅ |
+| `/analytics` | Token/cost usage | |
+| `/activity` | Event feed | |
+| `/config` | Settings | |
+| `/env` | API keys | |
+
+---
+
+## Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+K` / `Cmd+K` | Open command palette |
+| `↑` / `↓` | Navigate palette results |
+| `Enter` | Open selected page |
+| `Escape` | Close command palette |
 
 ---
 
 ## Documentation
 
-All documentation lives at **[hermes-agent.nousresearch.com/docs](https://hermes-agent.nousresearch.com/docs/)**:
-
-| Section | What's Covered |
-|---------|---------------|
-| [Quickstart](https://hermes-agent.nousresearch.com/docs/getting-started/quickstart) | Install → setup → first conversation in 2 minutes |
-| [CLI Usage](https://hermes-agent.nousresearch.com/docs/user-guide/cli) | Commands, keybindings, personalities, sessions |
-| [Configuration](https://hermes-agent.nousresearch.com/docs/user-guide/configuration) | Config file, providers, models, all options |
-| [Messaging Gateway](https://hermes-agent.nousresearch.com/docs/user-guide/messaging) | Telegram, Discord, Slack, WhatsApp, Signal, Home Assistant |
-| [Security](https://hermes-agent.nousresearch.com/docs/user-guide/security) | Command approval, DM pairing, container isolation |
-| [Tools & Toolsets](https://hermes-agent.nousresearch.com/docs/user-guide/features/tools) | 40+ tools, toolset system, terminal backends |
-| [Skills System](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills) | Procedural memory, Skills Hub, creating skills |
-| [Memory](https://hermes-agent.nousresearch.com/docs/user-guide/features/memory) | Persistent memory, user profiles, best practices |
-| [MCP Integration](https://hermes-agent.nousresearch.com/docs/user-guide/features/mcp) | Connect any MCP server for extended capabilities |
-| [Cron Scheduling](https://hermes-agent.nousresearch.com/docs/user-guide/features/cron) | Scheduled tasks with platform delivery |
-| [Context Files](https://hermes-agent.nousresearch.com/docs/user-guide/features/context-files) | Project context that shapes every conversation |
-| [Architecture](https://hermes-agent.nousresearch.com/docs/developer-guide/architecture) | Project structure, agent loop, key classes |
-| [Contributing](https://hermes-agent.nousresearch.com/docs/developer-guide/contributing) | Development setup, PR process, code style |
-| [CLI Reference](https://hermes-agent.nousresearch.com/docs/reference/cli-commands) | All commands and flags |
-| [Environment Variables](https://hermes-agent.nousresearch.com/docs/reference/environment-variables) | Complete env var reference |
+- **[MISSION_CONTROL.md](MISSION_CONTROL.md)** — Full documentation: installation, usage, API reference, troubleshooting
+- **[MISSION_CONTROL_QUICKREF.md](MISSION_CONTROL_QUICKREF.md)** — Quick reference card
+- **[README_UPSTREAM.md](README_UPSTREAM.md)** — Original Hermes Agent README from Nous Research
 
 ---
 
-## Migrating from OpenClaw
+## Based on
 
-If you're coming from OpenClaw, Hermes can automatically import your settings, memories, skills, and API keys.
-
-**During first-time setup:** The setup wizard (`hermes setup`) automatically detects `~/.openclaw` and offers to migrate before configuration begins.
-
-**Anytime after install:**
-
-```bash
-hermes claw migrate              # Interactive migration (full preset)
-hermes claw migrate --dry-run    # Preview what would be migrated
-hermes claw migrate --preset user-data   # Migrate without secrets
-hermes claw migrate --overwrite  # Overwrite existing conflicts
-```
-
-What gets imported:
-- **SOUL.md** — persona file
-- **Memories** — MEMORY.md and USER.md entries
-- **Skills** — user-created skills → `~/.hermes/skills/openclaw-imports/`
-- **Command allowlist** — approval patterns
-- **Messaging settings** — platform configs, allowed users, working directory
-- **API keys** — allowlisted secrets (Telegram, OpenRouter, OpenAI, Anthropic, ElevenLabs)
-- **TTS assets** — workspace audio files
-- **Workspace instructions** — AGENTS.md (with `--workspace-target`)
-
-See `hermes claw migrate --help` for all options, or use the `openclaw-migration` skill for an interactive agent-guided migration with dry-run previews.
-
----
-
-## Contributing
-
-We welcome contributions! See the [Contributing Guide](https://hermes-agent.nousresearch.com/docs/developer-guide/contributing) for development setup, code style, and PR process.
-
-Quick start for contributors — clone and go with `setup-hermes.sh`:
-
-```bash
-git clone https://github.com/NousResearch/hermes-agent.git
-cd hermes-agent
-./setup-hermes.sh     # installs uv, creates venv, installs .[all], symlinks ~/.local/bin/hermes
-./hermes              # auto-detects the venv, no need to `source` first
-```
-
-Manual path (equivalent to the above):
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-uv venv venv --python 3.11
-source venv/bin/activate
-uv pip install -e ".[all,dev]"
-python -m pytest tests/ -q
-```
-
-> **RL Training (optional):** To work on the RL/Tinker-Atropos integration:
-> ```bash
-> git submodule update --init tinker-atropos
-> uv pip install -e "./tinker-atropos"
-> ```
-
----
-
-## Community
-
-- 💬 [Discord](https://discord.gg/NousResearch)
-- 📚 [Skills Hub](https://agentskills.io)
-- 🐛 [Issues](https://github.com/NousResearch/hermes-agent/issues)
-- 💡 [Discussions](https://github.com/NousResearch/hermes-agent/discussions)
-- 🔌 [HermesClaw](https://github.com/AaronWong1999/hermesclaw) — Community WeChat bridge: Run Hermes Agent and OpenClaw on the same WeChat account.
-
----
+This project extends [Hermes Agent](https://github.com/NousResearch/hermes-agent) by Nous Research. The stock dashboard, backend, and core agent functionality are their work. Mission Control adds the operations layer on top.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
-
-Built by [Nous Research](https://nousresearch.com).
+MIT — same as upstream Hermes Agent.
